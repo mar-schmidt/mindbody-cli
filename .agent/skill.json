@@ -1,0 +1,36 @@
+{
+  "name": "mindbody-cli",
+  "version": "1.0.0",
+  "schemaVersion": "1",
+  "description": "Use the Mindbody CLI to manage a user's own gym and studio class bookings: list bookings and waitlist positions, browse the studio schedule, book and cancel classes, join and leave waitlists, and inspect membership passes. Trigger this skill when the user mentions Mindbody, gym or studio class bookings, booking a class, cancelling a class, waitlists, class schedules, membership passes, classId, siteVisitId, or waitlistId.\n",
+  "source": "https://raw.githubusercontent.com/mar-schmidt/mindbody-cli/master/.agent/SKILL.md",
+  "install": {
+    "pip": "pip install \"git+https://github.com/mar-schmidt/mindbody-cli.git\"",
+    "pipx": "pipx install \"git+https://github.com/mar-schmidt/mindbody-cli.git\""
+  },
+  "entrypoint": "mindbody",
+  "commands": [
+    "auth login",
+    "auth exchange",
+    "auth status",
+    "auth logout",
+    "auth bootstrap",
+    "auth env",
+    "profile",
+    "passes",
+    "status",
+    "schedule",
+    "bookings list",
+    "bookings create",
+    "bookings cancel",
+    "waitlist list",
+    "waitlist join",
+    "waitlist leave"
+  ],
+  "compatibility": [
+    "claude-desktop",
+    "cursor",
+    "continue",
+    "generic-mcp"
+  ]
+}
