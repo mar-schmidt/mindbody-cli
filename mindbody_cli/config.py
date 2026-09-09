@@ -33,20 +33,25 @@ DISCOVERY_PATH = "/.well-known/openid-configuration"
 # ---------------------------------------------------------------------------
 # OAuth public client
 #
-# This project deliberately ships NO client credentials. The authorization
-# server expects the identifiers used by the vendor's own mobile client, and
-# those belong to the vendor, not to this project. Vendoring them here would
-# redistribute someone else's identifiers and is exactly what DISCLAIMER.md
-# says this project does not do.
+# The DEFAULT_* values below are the identifiers the vendor's own iOS client
+# presents to the authorization server. They ship inside the publicly
+# distributed app and are sent on every login by every user of it: a public
+# client identifier, not a confidential secret, authorizing nothing without a
+# user's own credentials and consent.
 #
-# Supply them yourself via environment variables, or run
-# `mindbody auth bootstrap` once to import them from your own captured
-# traffic into your OS keychain.
+# They are bundled as defaults so a new user needs only their own username and
+# password. Environment variables and the OS keychain still take precedence
+# (see load_client_credentials), so an operator can override or replace them
+# without editing source. See DISCLAIMER.md.
 # ---------------------------------------------------------------------------
 
 CLIENT_ID_ENV = "MINDBODY_OAUTH_CLIENT_ID"
 CLIENT_SECRET_ENV = "MINDBODY_OAUTH_CLIENT_SECRET"
 REDIRECT_URI_ENV = "MINDBODY_OAUTH_REDIRECT_URI"
+
+DEFAULT_CLIENT_ID = "Mindbody.ConnectApp.iOS"
+DEFAULT_CLIENT_SECRET = "93ea5f23-03d1-7808-5ee1-3d0d49e4ae9c"
+DEFAULT_REDIRECT_URI = "x-mindbodyconnect-oauth-mindbody://authcode"
 
 OAUTH_SCOPES = (
     "openid profile email offline_access "

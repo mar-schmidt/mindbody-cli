@@ -3,9 +3,9 @@
 JSON-first CLI for the Mindbody consumer APIs, built for scripts and AI agents.
 
 > **Unofficial.** Not affiliated with, endorsed by, or connected to Mindbody,
-> Inc. Ships no vendor credentials. Read [DISCLAIMER.md](DISCLAIMER.md) before
-> using it — using an unofficial client may violate Mindbody's Terms of
-> Service, and booking actions have real consequences at a real business.
+> Inc. Read [DISCLAIMER.md](DISCLAIMER.md) before using it — using an unofficial
+> client may violate Mindbody's Terms of Service, and booking actions have real
+> consequences at a real business.
 
 ## Features
 
@@ -33,15 +33,16 @@ Both `mindbody` and the shorter `mb` are installed.
 
 ## Setup
 
-### 1. Provide a client registration
+All you need is your own account. The CLI already carries the public OAuth
+client identifier it presents to the sign-in server (the same one the vendor's
+mobile app uses — a public client id, not a secret; see
+[DISCLAIMER.md](DISCLAIMER.md)), so there is nothing to configure before
+logging in.
 
-This project deliberately ships **no** Mindbody credentials. The authorization
-server expects the identifiers used by the vendor's own mobile client, and
-those belong to the vendor — vendoring them here would redistribute someone
-else's identifiers, which is exactly what DISCLAIMER.md says this project does
-not do.
+### Overriding the bundled client (optional)
 
-Supply your own via environment variables:
+If you would rather supply your own client registration, set it via environment
+variables — they take precedence over the bundled default:
 
 ```bash
 export MINDBODY_OAUTH_CLIENT_ID="..."
@@ -49,14 +50,13 @@ export MINDBODY_OAUTH_CLIENT_SECRET="..."
 export MINDBODY_OAUTH_REDIRECT_URI="..."
 ```
 
-Or, if you have captured your own traffic, import them once into your OS
-keychain:
+Or import it once into your OS keychain from your own captured traffic:
 
 ```bash
 mindbody auth bootstrap --from-capture ./flows.jsonl
 ```
 
-### 2. Log in once
+### Log in
 
 Login is browserless by default and a one-time cost — afterwards the rotating
 refresh token keeps everything running with no further interaction. Username
@@ -99,7 +99,7 @@ mindbody auth login --print-url            # returns authorizeUrl + codeVerifier
 mindbody auth exchange --redirect-url "<pasted>" --code-verifier "<verifier>"
 ```
 
-### 3. Verify
+### Verify
 
 ```bash
 mindbody auth status

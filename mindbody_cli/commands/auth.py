@@ -87,10 +87,11 @@ def bootstrap(
     client_secret: str | None = typer.Option(None, "--client-secret"),
     redirect_uri: str | None = typer.Option(None, "--redirect-uri"),
 ) -> None:
-    """Store the OAuth client registration in the OS keychain.
+    """Store an OAuth client registration in the OS keychain.
 
-    This CLI ships no vendor credentials. Supply your own, or import them
-    from traffic you captured from your own account.
+    Optional: the CLI bundles a working public client by default. Use this only
+    to override it -- supply --client-id/--client-secret/--redirect-uri, or
+    import them from traffic you captured from your own account.
     """
 
     def action() -> dict[str, Any]:

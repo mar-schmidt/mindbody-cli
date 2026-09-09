@@ -32,10 +32,12 @@ from mindbody_cli.config import (
     AUTHORIZE_PATH,
     CLIENT_ID_ENV,
     CLIENT_SECRET_ENV,
+    DEFAULT_CLIENT_ID,
+    DEFAULT_CLIENT_SECRET,
+    DEFAULT_REDIRECT_URI,
     IDENTITY_HOST,
     OAUTH_SCOPES,
     REDIRECT_URI_ENV,
-    REDIRECT_URI_ENV as _REDIRECT_ENV,
     REVOCATION_PATH,
     TOKEN_PATH,
     USER_AGENT,
@@ -183,10 +185,12 @@ def _client_credentials_from_keyring() -> ClientCredentials | None:
 
 
 def load_client_credentials() -> ClientCredentials:
-    """Resolve client registration from env, then keychain.
+    """Resolve client registration: environment, then keychain, then defaults.
 
-    This project intentionally ships no default. See config.py and
-    DISCLAIMER.md for why.
+    The bundled defaults (config.DEFAULT_*) mean this never fails in normal
+    use -- a user needs only their own account. Environment variables and a
+    keychain-stored registration still win, so an operator can override the
+    bundled client without editing source.
     """
     env_id = os.environ.get(CLIENT_ID_ENV)
     env_secret = os.environ.get(CLIENT_SECRET_ENV)
@@ -202,19 +206,11 @@ def load_client_credentials() -> ClientCredentials:
             redirect_uri=env_redirect or stored.redirect_uri,
         )
 
-    raise CliError(
-        error="No OAuth client registration configured",
-        code="client_not_configured",
-        exit_code=exit_codes.AUTH,
-        details={
-            "hint": (
-                "This CLI ships no vendor credentials. Provide your own via "
-                f"{CLIENT_ID_ENV}, {CLIENT_SECRET_ENV} and {_REDIRECT_ENV}, "
-                "or run `mindbody auth bootstrap --from-capture <flows.jsonl>` "
-                "once to import them from your own captured traffic."
-            ),
-            "requiredEnv": [CLIENT_ID_ENV, CLIENT_SECRET_ENV, REDIRECT_URI_ENV],
-        },
+    # Fall back to the bundled public client, honouring any partial override.
+    return ClientCredentials(
+        client_id=env_id or DEFAULT_CLIENT_ID,
+        client_secret=env_secret or DEFAULT_CLIENT_SECRET,
+        redirect_uri=env_redirect or DEFAULT_REDIRECT_URI,
     )
 
 

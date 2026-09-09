@@ -237,7 +237,6 @@ instead of retrying the booking.
 |---|---|---|
 | `login_required` | no stored session | ask the user to run `mindbody auth login`; do not retry |
 | `auth_required` | upstream rejected the token | as above |
-| `client_not_configured` | no OAuth client registration | ask the user to configure it; see the README |
 | `missing_location` | studio ids unresolved | run `mindbody auth status --refresh` |
 | `class_not_found` | `classId` not in the upcoming schedule | re-run `schedule`; the id may be stale or from another studio |
 | `no_usable_pass` | no active pass with sessions left | run `passes`; tell the user their membership is exhausted |

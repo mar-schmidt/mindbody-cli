@@ -21,14 +21,29 @@ This repository contains original work by its authors:
   observing the network traffic of a client the authors were entitled to use,
   running against **their own account**.
 
+## The bundled OAuth client identifier
+
+To authenticate, the CLI presents the public OAuth client identifier that the
+vendor's own iOS application uses — a client id, its accompanying value, and a
+redirect URI. These ship inside the publicly distributed mobile app and are
+transmitted on every login by every user of that app. They are a **public
+client identifier**, not a confidential secret: under OAuth 2.0 for native apps
+(RFC 8252) such clients cannot keep a secret, and these authorize nothing on
+their own — no access is possible without a user's own credentials and consent.
+
+They are bundled as defaults so that a user needs only their own account. They
+can be overridden or replaced at runtime through environment variables or the
+OS keychain, without editing source. If you represent the rights holder and
+would prefer they not be distributed here, see **Rights holders** below; they
+will be removed on request.
+
 ## What this project does not contain
 
 - No Mindbody source code, in whole or in part.
 - No decompiled, disassembled, or otherwise reverse-engineered binaries.
 - No Mindbody images, icons, fonts, copy, or other creative assets.
-- **No Mindbody credentials, API keys, client secrets, or tokens.** The client
-  registration required to talk to the authorization server is deliberately
-  *not* vendored here. Users supply their own; see the README.
+- No end-user credentials or tokens. The only identifier bundled is the app's
+  public OAuth client, described above.
 - No circumvention of any technical protection measure. The project
   authenticates through the service's own published OAuth 2.0 endpoints using
   the user's own credentials, and does nothing an ordinary logged-in user of
