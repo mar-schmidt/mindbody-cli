@@ -1,41 +1,43 @@
 # Advanced usage
 
-## Setup on a headless host
+## Setup on an unattended host
 
-No browser needed. Provide credentials through the environment or stdin — not
-the command line, where they land in the process list and shell history.
+Login is browserless by default. Provide credentials through the environment or
+stdin — not the command line, where they land in the process list and history.
 
 ```bash
 export MINDBODY_USERNAME="you@example.com"
 read -rs MINDBODY_PASSWORD && export MINDBODY_PASSWORD
-mindbody auth login --headless
+mindbody auth login
 unset MINDBODY_PASSWORD
 ```
 
 ```json
-{"ok": true, "authenticated": true, "mode": "headless",
+{"ok": true, "authenticated": true, "mode": "credentials",
  "account": {"username": "you@example.com", "siteId": 25441, "userId": 27208803}}
 ```
 
 From here the host runs unattended: the refresh token rotates and persists
-automatically, so later commands need no credentials at all.
+automatically, so later commands need no credentials at all. Add
+`--save-credentials` to let the CLI re-authenticate itself should the refresh
+chain ever break.
 
-If the sign-in service ever starts challenging the headless client, you will
-get `headless_login_blocked`; fall back to the interactive browser flow
-(`mindbody auth login`) once to re-seed the refresh token.
+If the sign-in service ever starts challenging direct sign-in, you will get
+`headless_login_blocked`; fall back to the browser flow (`mindbody auth login
+--browser`) once to re-seed the refresh token.
 
 ### Reading the password from a secret file
 
 ```bash
-mindbody auth login --headless -u you@example.com --password-stdin < ~/.mb-secret
+mindbody auth login -u you@example.com --password-stdin < ~/.mb-secret
 ```
 
 ### Splitting the browser flow across machines
 
-When you do want the browser flow but the browser is on a different machine:
+When you want the browser fallback but the browser is on a different machine:
 
 ```bash
-mindbody auth login --print-url          # prints authorizeUrl + codeVerifier
+mindbody auth login --print-url          # implies --browser; prints url + verifier
 # open authorizeUrl elsewhere, sign in, copy the URL it stops on, then:
 mindbody auth exchange --redirect-url "<pasted>" --code-verifier "<verifier>"
 ```

@@ -239,7 +239,7 @@ def _headless_login(
             {
                 "hint": (
                     "Pass --username/-u, or set MINDBODY_USERNAME. Example: "
-                    "mindbody auth login --headless -u you@example.com"
+                    "mindbody auth login -u you@example.com"
                 )
             },
         )
@@ -279,7 +279,7 @@ def _headless_login(
     return {
         "ok": True,
         "authenticated": True,
-        "mode": "headless",
+        "mode": "credentials",
         "backend": runtime.store.backend,
         "savedCredentials": save_credentials,
         "account": state.redacted(),
@@ -289,16 +289,11 @@ def _headless_login(
 @app.command("login")
 def login(
     ctx: typer.Context,
-    headless: bool = typer.Option(
-        False,
-        "--headless",
-        help="Sign in without a browser. Intended for unattended hosts.",
-    ),
     account: str | None = typer.Option(
         None,
         "--username",
         "-u",
-        help="Account email (or set MINDBODY_USERNAME). Used with --headless.",
+        help="Account email (or set MINDBODY_USERNAME).",
     ),
     password: str | None = typer.Option(
         None,
@@ -318,33 +313,41 @@ def login(
         "--save-credentials",
         help=(
             "Store credentials in the keychain so the CLI can re-authenticate "
-            "itself if the refresh token is ever lost (headless only)."
+            "itself if the refresh token is ever lost."
         ),
+    ),
+    browser: bool = typer.Option(
+        False,
+        "--browser",
+        help="Use the interactive browser flow instead of signing in directly.",
     ),
     no_browser: bool = typer.Option(
         False,
         "--no-browser",
-        help="Print the authorize URL instead of opening a browser.",
+        help="With --browser, print the authorize URL instead of opening it.",
     ),
     print_url: bool = typer.Option(
         False,
         "--print-url",
-        help="Print the authorize URL and exit without waiting for a paste.",
+        help="Print the authorize URL and exit (implies --browser).",
     ),
 ) -> None:
-    """Log in. Interactive by default; use --headless on a server.
+    """Log in. Signs in directly with credentials -- no browser needed.
 
-    The identity server rejects loopback redirect URIs, so in the browser flow
-    it cannot hand the code back automatically: the browser stops on a page it
-    cannot open and you paste that URL back here. Either way this happens once
-    -- afterwards the rotating refresh token keeps the CLI running unattended.
+    This is the default because the CLI is built to run unattended. Provide the
+    username with -u or MINDBODY_USERNAME and the password via MINDBODY_PASSWORD,
+    --password-stdin, --password, or a prompt. Login happens once; the rotating
+    refresh token keeps the CLI running afterwards.
+
+    The interactive browser flow remains available behind --browser, as a
+    fallback if the sign-in service ever starts challenging direct sign-in.
     """
 
     def action() -> dict[str, Any]:
         runtime = get_runtime(ctx)
         creds = load_client_credentials()
 
-        if headless:
+        if not (browser or print_url):
             return _headless_login(
                 runtime,
                 creds,
@@ -371,9 +374,8 @@ def login(
             }
 
         # The PKCE verifier is generated per invocation, so the code must be
-        # redeemed by the same process that created the authorize URL. A
-        # non-interactive variant therefore cannot live here -- it is
-        # `auth login --print-url` followed by `auth exchange`.
+        # redeemed by the same process that created the authorize URL. The
+        # non-interactive split is `auth login --print-url` then `auth exchange`.
         if not no_browser:
             webbrowser.open(url)
         typer.echo(
@@ -398,6 +400,7 @@ def login(
         return {
             "ok": True,
             "authenticated": True,
+            "mode": "browser",
             "backend": runtime.store.backend,
             "account": state.redacted(),
         }
@@ -534,8 +537,8 @@ def env(ctx: typer.Context) -> None:
                 CLIENT_ID_ENV: "OAuth client id",
                 CLIENT_SECRET_ENV: "OAuth client secret",
                 REDIRECT_URI_ENV: "OAuth redirect URI",
-                USERNAME_ENV: "Account email for --headless login",
-                PASSWORD_ENV: "Account password for --headless login",
+                USERNAME_ENV: "Account email for login",
+                PASSWORD_ENV: "Account password for login",
                 "MINDBODY_CLI_TOKEN_PATH": "Token state file path",
                 "MINDBODY_CLI_TOKEN_BACKEND": "auto | keyring | file",
                 "MINDBODY_SITE_ID": "Default site id",

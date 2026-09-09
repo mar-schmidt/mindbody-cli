@@ -1,4 +1,4 @@
-"""Credential-resolution order for `auth login --headless`.
+"""Credential-resolution order for `auth login`.
 
 flag -> environment -> stdin -> prompt, for both username and password.
 The network call is stubbed; only which credentials reach it is asserted.

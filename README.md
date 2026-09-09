@@ -12,7 +12,7 @@ JSON-first CLI for the Mindbody consumer APIs, built for scripts and AI agents.
 - machine-readable JSON output by default (`--format text` for humans)
 - stable error contract (`error`, `code`, `details`) on stderr
 - fixed exit codes for automation
-- unattended operation: a browserless `--headless` login, then run forever
+- browserless by design: sign in with credentials, then run unattended forever
 - rotation-safe token storage (atomic writes, cross-process locking)
 - `--dry-run` on every mutating command
 
@@ -58,22 +58,20 @@ mindbody auth bootstrap --from-capture ./flows.jsonl
 
 ### 2. Log in once
 
-Either way, login is a one-time cost — afterwards the rotating refresh token
-keeps everything running with no further interaction.
-
-**Headless (recommended for servers):** no browser. Username from `-u` or
-`MINDBODY_USERNAME`; password from `MINDBODY_PASSWORD`, `--password-stdin`,
-`--password`, or a hidden prompt.
+Login is browserless by default and a one-time cost — afterwards the rotating
+refresh token keeps everything running with no further interaction. Username
+from `-u` or `MINDBODY_USERNAME`; password from `MINDBODY_PASSWORD`,
+`--password-stdin`, `--password`, or a hidden prompt.
 
 ```bash
 # Safest: password via environment or stdin, never on the command line.
 export MINDBODY_USERNAME="you@example.com"
 read -rs MINDBODY_PASSWORD && export MINDBODY_PASSWORD
-mindbody auth login --headless
+mindbody auth login
 unset MINDBODY_PASSWORD
 
 # Or pipe it:
-printf '%s' "$PW" | mindbody auth login --headless -u you@example.com --password-stdin
+printf '%s' "$PW" | mindbody auth login -u you@example.com --password-stdin
 ```
 
 `--password` exists too, but it is visible in the process list and shell
@@ -84,10 +82,11 @@ The CLI then re-authenticates itself if the refresh token is ever lost —
 useful on an unattended host, at the cost of a password at rest. `mindbody auth
 logout` clears them again.
 
-**Interactive (browser):**
+**Browser fallback.** If the sign-in service ever starts challenging direct
+sign-in, `--browser` runs the interactive flow instead:
 
 ```bash
-mindbody auth login
+mindbody auth login --browser
 ```
 
 The identity server rejects loopback redirect URIs, so the browser cannot hand
@@ -161,8 +160,8 @@ Exit codes:
 | `MINDBODY_OAUTH_CLIENT_ID` | OAuth client id |
 | `MINDBODY_OAUTH_CLIENT_SECRET` | OAuth client secret |
 | `MINDBODY_OAUTH_REDIRECT_URI` | OAuth redirect URI |
-| `MINDBODY_USERNAME` | Account email for `--headless` login |
-| `MINDBODY_PASSWORD` | Account password for `--headless` login |
+| `MINDBODY_USERNAME` | Account email for login |
+| `MINDBODY_PASSWORD` | Account password for login |
 | `MINDBODY_CLI_TOKEN_PATH` | Token state file path |
 | `MINDBODY_CLI_TOKEN_BACKEND` | `auto` (default), `keyring`, or `file` |
 | `MINDBODY_SITE_ID` | Default studio site id |
