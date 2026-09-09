@@ -44,6 +44,67 @@ from mindbody_cli.errors import CliError
 
 KEYRING_SERVICE = "mindbody-cli"
 KEYRING_CLIENT_USERNAME = "oauth_client"
+KEYRING_ACCOUNT_USERNAME = "account_password"
+
+
+# ---------------------------------------------------------------------------
+# Optional account credentials
+#
+# Storing the account password is opt-in. It buys one thing: an unattended
+# host can recover by itself when the refresh chain breaks, instead of waiting
+# for a human with a browser. It costs the obvious thing: a password at rest.
+# Refresh tokens remain the normal path; this is only the fallback.
+# ---------------------------------------------------------------------------
+
+
+def store_account_password(username: str, password: str) -> None:
+    """Persist account credentials for unattended re-authentication."""
+    try:
+        import keyring
+
+        keyring.set_password(
+            KEYRING_SERVICE,
+            KEYRING_ACCOUNT_USERNAME,
+            json.dumps({"username": username, "password": password}),
+        )
+    except Exception as exc:
+        raise CliError(
+            error="Failed to store account password in keyring",
+            code="keyring_store_failed",
+            exit_code=exit_codes.AUTH,
+            details={"reason": str(exc)},
+        ) from exc
+
+
+def load_account_password() -> tuple[str, str] | None:
+    """Return stored (username, password), or None when not configured."""
+    try:
+        import keyring
+
+        raw = keyring.get_password(KEYRING_SERVICE, KEYRING_ACCOUNT_USERNAME)
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return None
+    username = data.get("username")
+    password = data.get("password")
+    if not username or not password:
+        return None
+    return username, password
+
+
+def clear_account_password() -> None:
+    try:
+        import keyring
+
+        if keyring.get_password(KEYRING_SERVICE, KEYRING_ACCOUNT_USERNAME):
+            keyring.delete_password(KEYRING_SERVICE, KEYRING_ACCOUNT_USERNAME)
+    except Exception:
+        return
 
 
 # ---------------------------------------------------------------------------
@@ -439,6 +500,219 @@ def ensure_fresh_tokens(
         state = store.load()
         if not force and not state.needs_refresh():
             return state
-        state = refresh_tokens(resolved, state)
+        try:
+            state = refresh_tokens(resolved, state)
+        except CliError as exc:
+            # The refresh chain is broken -- a rotated token was lost, or the
+            # session was revoked elsewhere. Recover automatically only if the
+            # account holder opted in by saving their credentials; otherwise
+            # surface the error so they re-authenticate deliberately.
+            recovered = _recover_with_saved_credentials(resolved, state, exc)
+            if recovered is None:
+                raise
+            state = recovered
         store.save(state)
     return state
+
+
+def _recover_with_saved_credentials(
+    creds: ClientCredentials,
+    state: TokenState,
+    failure: CliError,
+) -> TokenState | None:
+    """Re-run headless sign-in from saved credentials, or None to give up."""
+    if failure.exit_code != exit_codes.AUTH:
+        return None
+    saved = load_account_password()
+    if not saved:
+        return None
+    username, password = saved
+    refreshed = headless_login(
+        creds,
+        username=username,
+        password=password,
+        state=state,
+    )
+    refreshed.username = username
+    return refreshed
+
+
+# ---------------------------------------------------------------------------
+# Non-interactive sign-in
+# ---------------------------------------------------------------------------
+
+# The sign-in pages are served to a web view and answer to a browser-shaped
+# client; the token endpoint expects the native client's own agent.
+BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) "
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Mobile/15E148 "
+    "Safari/604.1"
+)
+
+
+def _absolute(url: str) -> str:
+    return url if url.startswith("http") else f"{IDENTITY_HOST}{url}"
+
+
+def headless_login(
+    creds: ClientCredentials,
+    *,
+    username: str,
+    password: str,
+    state: TokenState | None = None,
+    timeout: float = 30.0,
+) -> TokenState:
+    """Complete the authorization-code flow without opening a browser.
+
+    This drives the service's own published sign-in form on behalf of the
+    account holder, using credentials they supplied for their own account. It
+    is the same request sequence the official client performs. It exists
+    because the alternative -- pasting a redirect URL out of a browser -- is
+    not viable on an unattended host.
+
+    The sign-in service uses standard ASP.NET Core antiforgery: ``/api/csrf``
+    returns a token in its body and sets a paired cookie, and the login POST
+    echoes that token in a ``requestverificationtoken`` header. No JavaScript
+    is involved, so an ordinary HTTP client with a cookie jar suffices.
+
+    This path can stop working the moment the operator enables a stricter
+    challenge on the login POST. That is not something to defeat: the error
+    raised below points at the browser flow instead.
+    """
+    pkce = generate_pkce()
+    authorize_url = build_authorize_url(creds, pkce)
+
+    headers = {
+        "User-Agent": BROWSER_USER_AGENT,
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": ACCEPT_LANGUAGE,
+        "Origin": IDENTITY_HOST,
+    }
+
+    with httpx.Client(
+        timeout=timeout,
+        follow_redirects=False,
+        headers=headers,
+    ) as http:
+        try:
+            # 1. Start the flow. The server redirects to the sign-in page,
+            #    carrying the whole authorize request in ReturnUrl.
+            first = http.get(authorize_url)
+            location = first.headers.get("location")
+            if first.status_code != 302 or not location:
+                raise CliError(
+                    error="Authorization endpoint did not start a sign-in flow",
+                    code="headless_login_unexpected_response",
+                    exit_code=exit_codes.AUTH,
+                    details={"status": first.status_code},
+                )
+            signin_url = _absolute(location)
+            return_url = urllib.parse.parse_qs(
+                urllib.parse.urlparse(signin_url).query
+            ).get("ReturnUrl", [""])[0]
+
+            # 2. Load the sign-in page so the session is established normally.
+            http.get(signin_url)
+
+            # 3. Antiforgery token, plus the cookie that pairs with it.
+            csrf_response = http.get(f"{IDENTITY_HOST}/api/csrf")
+            try:
+                token = csrf_response.json()["requestVerificationToken"]
+            except (ValueError, KeyError) as exc:
+                raise CliError(
+                    error="Could not obtain an antiforgery token",
+                    code="headless_login_blocked",
+                    exit_code=exit_codes.AUTH,
+                    details={
+                        "status": csrf_response.status_code,
+                        "hint": (
+                            "The sign-in service is not answering this client. "
+                            "Use the browser flow: `mindbody auth login`."
+                        ),
+                    },
+                ) from exc
+
+            # 4. Submit the account holder's credentials.
+            login_response = http.post(
+                f"{IDENTITY_HOST}/account/login",
+                params={"ReturnUrl": return_url} if return_url else None,
+                json={
+                    "username": username,
+                    "password": password,
+                    "isStaff": False,
+                },
+                headers={
+                    "requestverificationtoken": token,
+                    "Content-Type": "application/json",
+                    "Referer": signin_url,
+                },
+            )
+
+            if login_response.status_code in (401, 403):
+                raise CliError(
+                    error="Sign-in was rejected",
+                    code="invalid_credentials",
+                    exit_code=exit_codes.AUTH,
+                    details={
+                        "status": login_response.status_code,
+                        "hint": (
+                            "Either the credentials are wrong, or the service "
+                            "is challenging this client. Run `mindbody auth "
+                            "login` in a browser to tell the two apart."
+                        ),
+                    },
+                )
+            if login_response.status_code >= 400:
+                body: Any
+                try:
+                    body = login_response.json()
+                except ValueError:
+                    body = login_response.text[:400]
+                raise CliError(
+                    error="Sign-in failed",
+                    code="headless_login_failed",
+                    exit_code=exit_codes.AUTH,
+                    details={
+                        "status": login_response.status_code,
+                        "response": body,
+                    },
+                )
+
+            try:
+                redirect_url = login_response.json()["redirectUrl"]
+            except (ValueError, KeyError) as exc:
+                raise CliError(
+                    error="Sign-in response did not contain a redirect",
+                    code="headless_login_unexpected_response",
+                    exit_code=exit_codes.AUTH,
+                    details={"status": login_response.status_code},
+                ) from exc
+
+            # 5. Follow the callback. It hands the code over on the custom
+            #    scheme a browser cannot open but which we can simply read.
+            callback = http.get(_absolute(redirect_url))
+            code_location = callback.headers.get("location")
+            if not code_location:
+                raise CliError(
+                    error="Authorization callback did not return a code",
+                    code="headless_login_no_code",
+                    exit_code=exit_codes.AUTH,
+                    details={"status": callback.status_code},
+                )
+        except httpx.TimeoutException as exc:
+            raise CliError(
+                error="Timed out during sign-in",
+                code="network_timeout",
+                exit_code=exit_codes.NETWORK,
+                details={"host": IDENTITY_HOST},
+            ) from exc
+        except httpx.RequestError as exc:
+            raise CliError(
+                error="Network error during sign-in",
+                code="network_error",
+                exit_code=exit_codes.NETWORK,
+                details={"host": IDENTITY_HOST, "reason": str(exc)},
+            ) from exc
+
+    code = extract_code(code_location, expected_state=pkce.state)
+    return exchange_code(creds, code=code, verifier=pkce.verifier, state=state)

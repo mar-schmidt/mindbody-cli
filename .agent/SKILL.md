@@ -113,18 +113,30 @@ Rules that follow from this:
 ```bash
 mindbody auth status                 # is the session usable?
 mindbody auth status --refresh       # force refresh + re-resolve studio ids
-mindbody auth login                  # interactive, needs a browser, once
+mindbody auth login                  # interactive, browser
+mindbody auth login --headless -u <email>   # browserless, for servers
 mindbody auth logout                 # revokes upstream, clears local state
 mindbody auth env                    # list env vars and exit codes
 ```
 
-`auth login` requires a human with a browser. **If you get exit code 2, stop
-and ask the user to run `mindbody auth login` themselves.** Do not attempt to
-automate it, and do not ask the user for their password — this CLI has no
-password-based login and never will.
+There are two ways to log in, and both are a one-time cost — afterwards the CLI
+rotates and persists its own tokens and runs fully unattended.
 
-Login is a one-time cost. Afterwards the CLI refreshes its own tokens and runs
-unattended.
+- **Interactive** (`mindbody auth login`): opens a browser, the user signs in,
+  and pastes back the URL the browser stops on. Needs a human once.
+- **Headless** (`mindbody auth login --headless`): no browser. The username
+  comes from `-u`/`--username` or `MINDBODY_USERNAME`; the password from
+  `MINDBODY_PASSWORD`, `--password-stdin`, `--password`, or a hidden prompt.
+  Adding `--save-credentials` stores them in the keychain so the CLI can
+  recover by itself if the refresh token is ever lost; `auth logout` clears
+  them. Suggest this only if the user wants unattended self-healing and
+  accepts a password at rest.
+
+**On exit code 2 (`login_required`), do not loop and do not retry.** Tell the
+user to authenticate. Only run `auth login --headless` yourself if the user has
+provided credentials for this purpose (via environment or explicitly); never
+solicit a password to store it on your own initiative. Prefer `MINDBODY_PASSWORD`
+or `--password-stdin` over `--password`, which is visible in the process list.
 
 ### Reading
 
@@ -245,8 +257,11 @@ instead of retrying the booking.
 - Do not use a `classId` where a `siteVisitId` is required, or vice versa.
 - Do not guess, construct, or increment identifiers.
 - Do not treat a waitlist entry as a confirmed booking.
-- Do not retry on exit code 2 — it will never succeed without a human.
-- Do not ask the user for their Mindbody password. There is no password login.
+- Do not retry on exit code 2. Re-authenticate instead: a human for the browser
+  flow, or `auth login --headless` only with credentials the user has already
+  provided for that purpose.
+- Do not solicit the user's password just to store it. Headless login is for
+  credentials the user chose to supply (env/stdin), not something to request.
 - Do not parse the human-readable `--format text` output; use the default JSON.
 - Do not poll `schedule` in a loop to snipe a cancellation. This is a personal
   tool, and the disclaimer asks users to keep request volume reasonable.

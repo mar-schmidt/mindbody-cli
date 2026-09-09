@@ -12,7 +12,7 @@ JSON-first CLI for the Mindbody consumer APIs, built for scripts and AI agents.
 - machine-readable JSON output by default (`--format text` for humans)
 - stable error contract (`error`, `code`, `details`) on stderr
 - fixed exit codes for automation
-- unattended operation: log in once in a browser, then run headless forever
+- unattended operation: a browserless `--headless` login, then run forever
 - rotation-safe token storage (atomic writes, cross-process locking)
 - `--dry-run` on every mutating command
 
@@ -58,17 +58,42 @@ mindbody auth bootstrap --from-capture ./flows.jsonl
 
 ### 2. Log in once
 
+Either way, login is a one-time cost — afterwards the rotating refresh token
+keeps everything running with no further interaction.
+
+**Headless (recommended for servers):** no browser. Username from `-u` or
+`MINDBODY_USERNAME`; password from `MINDBODY_PASSWORD`, `--password-stdin`,
+`--password`, or a hidden prompt.
+
+```bash
+# Safest: password via environment or stdin, never on the command line.
+export MINDBODY_USERNAME="you@example.com"
+read -rs MINDBODY_PASSWORD && export MINDBODY_PASSWORD
+mindbody auth login --headless
+unset MINDBODY_PASSWORD
+
+# Or pipe it:
+printf '%s' "$PW" | mindbody auth login --headless -u you@example.com --password-stdin
+```
+
+`--password` exists too, but it is visible in the process list and shell
+history — prefer the environment variable or stdin.
+
+Add `--save-credentials` to store the username and password in the keychain.
+The CLI then re-authenticates itself if the refresh token is ever lost —
+useful on an unattended host, at the cost of a password at rest. `mindbody auth
+logout` clears them again.
+
+**Interactive (browser):**
+
 ```bash
 mindbody auth login
 ```
 
 The identity server rejects loopback redirect URIs, so the browser cannot hand
-the code back automatically. It opens your browser, you sign in normally, the
-browser stops on a page it cannot open, and you paste that URL back. This
-happens **once** — afterwards the refresh token keeps everything running with
-no browser involved.
-
-For fully scripted setup:
+the code back automatically: it opens your browser, you sign in, the browser
+stops on a page it cannot open, and you paste that URL back. Fully scripted
+variant:
 
 ```bash
 mindbody auth login --print-url            # returns authorizeUrl + codeVerifier
@@ -136,6 +161,8 @@ Exit codes:
 | `MINDBODY_OAUTH_CLIENT_ID` | OAuth client id |
 | `MINDBODY_OAUTH_CLIENT_SECRET` | OAuth client secret |
 | `MINDBODY_OAUTH_REDIRECT_URI` | OAuth redirect URI |
+| `MINDBODY_USERNAME` | Account email for `--headless` login |
+| `MINDBODY_PASSWORD` | Account password for `--headless` login |
 | `MINDBODY_CLI_TOKEN_PATH` | Token state file path |
 | `MINDBODY_CLI_TOKEN_BACKEND` | `auto` (default), `keyring`, or `file` |
 | `MINDBODY_SITE_ID` | Default studio site id |

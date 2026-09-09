@@ -106,6 +106,46 @@ def get_activity_profile(client: MindbodyHttpClient) -> dict[str, Any]:
     return {}
 
 
+USER_INFO_URL = f"{GATEWAY_HOST}/v1/user/info"
+
+# Keys under which the numeric legacy (MBO) user id might appear. The JWT only
+# carries the identity-service id, so the numeric id -- the one the legacy REST
+# service needs in its paths -- has to come from here.
+_USER_ID_KEYS = ("mbUserId", "mb_user_id", "userId", "user_id", "id", "MboUserId")
+
+
+def _search_numeric_user_id(value: Any, depth: int = 0) -> int | None:
+    """Best-effort hunt for a numeric MBO user id in an unknown shape."""
+    if depth > 4:
+        return None
+    if isinstance(value, dict):
+        for key in _USER_ID_KEYS:
+            raw = value.get(key)
+            if isinstance(raw, int) and raw > 0:
+                return raw
+            if isinstance(raw, str) and raw.isdigit():
+                return int(raw)
+        for nested in value.values():
+            found = _search_numeric_user_id(nested, depth + 1)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for item in value:
+            found = _search_numeric_user_id(item, depth + 1)
+            if found is not None:
+                return found
+    return None
+
+
+def resolve_user_id(client: MindbodyHttpClient) -> int | None:
+    """Resolve the numeric MBO user id used by the legacy REST service."""
+    try:
+        data = client.request_json("GET", USER_INFO_URL)
+    except Exception:
+        return None
+    return _search_numeric_user_id(data)
+
+
 def list_schedules(
     client: MindbodyHttpClient,
     location: LocationRef,

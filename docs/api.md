@@ -42,20 +42,28 @@ OAuth 2.0 authorization code with PKCE (S256).
 Response: `access_token` (JWT, 12 h), `refresh_token` (opaque), `id_token`,
 `expires_in: 43200`.
 
-### 2.2 The WAF does not cover the token endpoint — **verified**
+### 2.2 The WAF does not gate the API, and barely gates sign-in — **verified**
 
-The interactive sign-in pages (`/signin`, `/api/csrf`, `/account/search`,
-`/account/login`) sit behind a JavaScript challenge and require a
-`cf_clearance` cookie.
+A `cf_clearance` cookie appears on the sign-in requests in a packet capture,
+which first looked like a hard requirement. It is not. Tested directly:
 
-`/connect/token` does not. A `refresh_token` grant with no cookies at all —
-only Basic auth and the client's User-Agent — returns 200 with a fresh access
-token and all scopes intact.
+- `GET /api/csrf` returns 200 **with no cookies at all**, under both the mobile
+  and a desktop User-Agent. It sets a standard `.AspNetCore.Antiforgery`
+  cookie and returns the token in its body.
+- `POST /account/login` in the capture carried no `cf_clearance` — only a
+  Google Analytics cookie.
+- `/connect/token` is entirely uncovered: a `refresh_token` grant with no
+  cookies, just Basic auth and the client User-Agent, returns 200.
 
-**Consequence:** the browser is needed exactly once. All subsequent operation
-is headless.
+**Consequence:** the whole flow is doable without a browser. The login is plain
+ASP.NET Core antiforgery — `/api/csrf` issues a token and a paired cookie, and
+`/account/login` echoes the token in a `requestverificationtoken` header. No
+JavaScript. An HTTP client with a cookie jar completes it; see
+`client/oauth.py::headless_login`. This can regress the moment the operator
+enables a stricter challenge on the login POST, which is why the interactive
+browser flow is retained as a fallback.
 
-### 2.3 The password grant is unavailable — **verified**
+### 2.3 The `password` grant is unavailable — **verified**
 
 Discovery advertises `password` in `grant_types_supported`, but that describes
 the server, not what a given client may do.
@@ -65,14 +73,16 @@ invalid for target resource","Code":400}`. The envelope is not the identity
 server's OAuth error format, which suggests rejection in a layer ahead of the
 token logic.
 
-**Consequence:** there is no username/password path, and this CLI stores no
-password.
+**Consequence:** there is no OAuth ROPC path. Browserless login is achieved by
+driving the sign-in form (2.2), not by a password grant.
 
 ### 2.4 Refresh tokens rotate — **verified**
 
 The token sent is invalidated when the response is produced, and a new refresh
 token is returned. See `client/tokens.py` for the atomicity and locking this
-forces.
+forces. If a rotation is lost despite that, the chain is broken and needs a
+fresh sign-in; `auth login --save-credentials` lets the CLI do that sign-in
+itself rather than waiting for a human.
 
 ### 2.5 Loopback redirect URIs are rejected — **verified**
 
@@ -85,7 +95,9 @@ Identical `/connect/authorize` requests varying only `redirect_uri`:
 | `http://127.0.0.1:<port>/callback` | 302 → `/home/error` (rejected) |
 
 **Consequence:** the standard CLI loopback-listener pattern is unavailable. The
-one-time login captures the redirect from the browser's address bar instead.
+interactive login captures the redirect from the browser's address bar instead;
+the headless flow (2.2) reads it straight off the callback response and sidesteps
+the issue entirely.
 
 ### 2.6 Revocation exists — **verified**
 

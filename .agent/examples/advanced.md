@@ -1,31 +1,44 @@
 # Advanced usage
 
-## Scripted setup on a headless host
+## Setup on a headless host
 
-`auth login` needs a browser once. Split it across machines:
+No browser needed. Provide credentials through the environment or stdin — not
+the command line, where they land in the process list and shell history.
 
 ```bash
-# On the headless host: get the URL and the verifier.
-mindbody auth login --print-url
+export MINDBODY_USERNAME="you@example.com"
+read -rs MINDBODY_PASSWORD && export MINDBODY_PASSWORD
+mindbody auth login --headless
+unset MINDBODY_PASSWORD
 ```
 
 ```json
-{"ok": true, "stage": "authorize_url",
- "authorizeUrl": "https://signin.mindbodyonline.com/connect/authorize?...",
- "state": "…", "codeVerifier": "…"}
+{"ok": true, "authenticated": true, "mode": "headless",
+ "account": {"username": "you@example.com", "siteId": 25441, "userId": 27208803}}
 ```
 
-Open `authorizeUrl` on any machine with a browser, sign in, and copy the URL
-the browser stops on. Then, back on the host:
+From here the host runs unattended: the refresh token rotates and persists
+automatically, so later commands need no credentials at all.
+
+If the sign-in service ever starts challenging the headless client, you will
+get `headless_login_blocked`; fall back to the interactive browser flow
+(`mindbody auth login`) once to re-seed the refresh token.
+
+### Reading the password from a secret file
 
 ```bash
-mindbody auth exchange \
-  --redirect-url "x-mindbodyconnect-oauth-mindbody://authcode?code=…&state=…" \
-  --code-verifier "…"
+mindbody auth login --headless -u you@example.com --password-stdin < ~/.mb-secret
 ```
 
-From here the host runs unattended: the refresh token is rotated and persisted
-automatically.
+### Splitting the browser flow across machines
+
+When you do want the browser flow but the browser is on a different machine:
+
+```bash
+mindbody auth login --print-url          # prints authorizeUrl + codeVerifier
+# open authorizeUrl elsewhere, sign in, copy the URL it stops on, then:
+mindbody auth exchange --redirect-url "<pasted>" --code-verifier "<verifier>"
+```
 
 ## Composing with jq
 

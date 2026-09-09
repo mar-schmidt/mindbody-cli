@@ -51,6 +51,7 @@ class TokenState:
     id_token: str | None = None
     expires_at: float | None = None
     scope: str | None = None
+    username: str | None = None
     user_id: int | None = None
     identity_id: str | None = None
     site_id: int | None = None
@@ -90,6 +91,7 @@ class TokenState:
                 else None
             ),
             "scope": self.scope,
+            "username": self.username,
             "userId": self.user_id,
             "identityId": self.identity_id,
             "siteId": self.site_id,

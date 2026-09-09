@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import sys
 import urllib.parse
 import webbrowser
 from pathlib import Path
@@ -17,19 +19,24 @@ from mindbody_cli.client import gateway, identity
 from mindbody_cli.client.oauth import (
     ClientCredentials,
     build_authorize_url,
+    clear_account_password,
     clear_client_credentials,
     exchange_code,
     extract_code,
     generate_pkce,
+    headless_login,
     load_client_credentials,
     revoke_refresh_token,
+    store_account_password,
     store_client_credentials,
 )
 from mindbody_cli.client.tokens import TokenState
 from mindbody_cli.config import (
     CLIENT_ID_ENV,
     CLIENT_SECRET_ENV,
+    PASSWORD_ENV,
     REDIRECT_URI_ENV,
+    USERNAME_ENV,
 )
 from mindbody_cli.errors import CliError
 from mindbody_cli.models import normalize_profile, summarize_activity_profile
@@ -44,6 +51,11 @@ def _resolve_identifiers(runtime: Any, state: TokenState) -> TokenState:
     try:
         profile = identity.get_me(client)
         state.identity_id = profile.get("id") or state.identity_id
+    except CliError:
+        pass
+
+    try:
+        state.user_id = gateway.resolve_user_id(client) or state.user_id
     except CliError:
         pass
 
@@ -203,9 +215,112 @@ def _extract_client_from_capture(path: Path) -> dict[str, str]:
     return found
 
 
+def _headless_login(
+    runtime: Any,
+    creds: ClientCredentials,
+    account: str | None,
+    password: str | None,
+    password_stdin: bool,
+    save_credentials: bool = False,
+) -> dict[str, Any]:
+    """Sign in on a host with no browser available.
+
+    Username resolves flag -> ``MINDBODY_USERNAME``; password resolves flag ->
+    ``MINDBODY_PASSWORD`` -> stdin -> hidden prompt. Environment variables and
+    stdin are safer than a ``--password`` flag, which is visible in the process
+    list and shell history; the flag exists for parity and convenience, with
+    that caveat documented.
+    """
+    resolved_user = account or os.environ.get(USERNAME_ENV)
+    if not resolved_user:
+        raise usage_error(
+            "No username provided",
+            "missing_username",
+            {
+                "hint": (
+                    "Pass --username/-u, or set MINDBODY_USERNAME. Example: "
+                    "mindbody auth login --headless -u you@example.com"
+                )
+            },
+        )
+
+    secret = password or os.environ.get(PASSWORD_ENV)
+    if not secret and password_stdin:
+        secret = sys.stdin.readline().rstrip("\n")
+    if not secret and not password_stdin and sys.stdin.isatty():
+        secret = typer.prompt("Password", hide_input=True, err=True)
+    if not secret:
+        raise usage_error(
+            "No password provided",
+            "missing_password",
+            {
+                "hint": (
+                    "Pass --password, set MINDBODY_PASSWORD, or pipe it with "
+                    "--password-stdin. Environment or stdin is preferred over "
+                    "--password, which is visible in the process list."
+                )
+            },
+        )
+
+    state = headless_login(
+        creds,
+        username=resolved_user,
+        password=secret,
+        state=runtime.store.load(),
+    )
+    state.username = resolved_user
+    runtime.store.save(state)
+    state = _resolve_identifiers(runtime, state)
+    runtime.store.save(state)
+
+    if save_credentials:
+        store_account_password(resolved_user, secret)
+
+    return {
+        "ok": True,
+        "authenticated": True,
+        "mode": "headless",
+        "backend": runtime.store.backend,
+        "savedCredentials": save_credentials,
+        "account": state.redacted(),
+    }
+
+
 @app.command("login")
 def login(
     ctx: typer.Context,
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Sign in without a browser. Intended for unattended hosts.",
+    ),
+    account: str | None = typer.Option(
+        None,
+        "--username",
+        "-u",
+        help="Account email (or set MINDBODY_USERNAME). Used with --headless.",
+    ),
+    password: str | None = typer.Option(
+        None,
+        "--password",
+        help=(
+            "Account password (or set MINDBODY_PASSWORD). Visible in the "
+            "process list; prefer MINDBODY_PASSWORD or --password-stdin."
+        ),
+    ),
+    password_stdin: bool = typer.Option(
+        False,
+        "--password-stdin",
+        help="Read the password from stdin rather than prompting for it.",
+    ),
+    save_credentials: bool = typer.Option(
+        False,
+        "--save-credentials",
+        help=(
+            "Store credentials in the keychain so the CLI can re-authenticate "
+            "itself if the refresh token is ever lost (headless only)."
+        ),
+    ),
     no_browser: bool = typer.Option(
         False,
         "--no-browser",
@@ -217,17 +332,28 @@ def login(
         help="Print the authorize URL and exit without waiting for a paste.",
     ),
 ) -> None:
-    """One-time interactive login.
+    """Log in. Interactive by default; use --headless on a server.
 
-    The identity server rejects loopback redirect URIs, so the browser cannot
-    hand the code back automatically: it stops on a page it cannot open and
-    you paste that URL back here. This happens once -- afterwards the refresh
-    token keeps the CLI running unattended.
+    The identity server rejects loopback redirect URIs, so in the browser flow
+    it cannot hand the code back automatically: the browser stops on a page it
+    cannot open and you paste that URL back here. Either way this happens once
+    -- afterwards the rotating refresh token keeps the CLI running unattended.
     """
 
     def action() -> dict[str, Any]:
         runtime = get_runtime(ctx)
         creds = load_client_credentials()
+
+        if headless:
+            return _headless_login(
+                runtime,
+                creds,
+                account,
+                password,
+                password_stdin,
+                save_credentials,
+            )
+
         pkce = generate_pkce()
         url = build_authorize_url(creds, pkce)
 
@@ -381,6 +507,9 @@ def logout(
                 revoked = False
 
         runtime.store.clear()
+        # Saved account credentials must go too. Leaving them would let the
+        # next command silently re-authenticate, so logout would not log out.
+        clear_account_password()
         if forget_client:
             clear_client_credentials()
 
@@ -405,6 +534,8 @@ def env(ctx: typer.Context) -> None:
                 CLIENT_ID_ENV: "OAuth client id",
                 CLIENT_SECRET_ENV: "OAuth client secret",
                 REDIRECT_URI_ENV: "OAuth redirect URI",
+                USERNAME_ENV: "Account email for --headless login",
+                PASSWORD_ENV: "Account password for --headless login",
                 "MINDBODY_CLI_TOKEN_PATH": "Token state file path",
                 "MINDBODY_CLI_TOKEN_BACKEND": "auto | keyring | file",
                 "MINDBODY_SITE_ID": "Default site id",
