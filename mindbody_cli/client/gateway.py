@@ -62,15 +62,24 @@ def list_upcoming_bookings(
     """Bookings from now forward.
 
     ``filter.before`` is an upper bound on start time, so a forward-looking
-    query asks for everything before a far horizon in ascending order and
-    then drops anything already in the past.
+    query asks for everything before a far horizon and then drops anything
+    already in the past.
+
+    The ordering is load-bearing and must stay **descending**. The endpoint
+    returns one capped page (the server caps ``page.size`` at 100 however much
+    is requested), so an ascending query returns the *oldest* page of an
+    account's history. For anyone with more than a page of past bookings that
+    page is entirely in the past, the filter below discards all of it, and the
+    caller sees zero upcoming bookings while ``status`` reports several — the
+    failure observed on a real account with history back to 2022. Descending
+    puts the newest entries, and so every future one, on the returned page.
     """
     horizon = datetime.now(UTC) + timedelta(days=horizon_days)
     entries = list_bookings(
         client,
         page_size=page_size,
         before=horizon,
-        ascending=True,
+        ascending=False,
     )
     now = datetime.now(UTC)
     upcoming: list[dict[str, Any]] = []
